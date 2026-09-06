@@ -24,32 +24,72 @@ jobs:
           from pathlib import Path
           from urllib.parse import quote
           from urllib.request import Request, urlopen
+
           API='https://arhiiv.err.ee/api/v1'
           SERIES='https://arhiiv.err.ee/audio/seeria/ajalootund-r2-s?limit=500'
+
           def get_json(url, method='GET'):
-              with urlopen(Request(url, method=method, headers={'Accept':'application/json','User-Agent':'Ajalootund RSS feed'}), timeout=60) as r: return json.load(r)
+              with urlopen(Request(url, method=method, headers={'Accept':'application/json','User-Agent':'Ajalootund RSS feed'}), timeout=60) as r:
+                  return json.load(r)
+
           pages=[get_json(f'{API}/series/audio/ajalootund-r2-s?limit=500&page={p}&all=false','POST') for p in (1,2)]
           seen=set(); items=[]
           for page in pages:
               for item in page['activeList']['data']:
-                  if item.get('url') and item['url'] not in seen: seen.add(item['url']); items.append(item)
+                  if item.get('url') and item['url'] not in seen:
+                      seen.add(item['url']); items.append(item)
+
           def stream(item):
-              media=get_json(f"{API}/content/audio/{quote(item['url'],safe='')}").get('mainContent',{}).get('medias',[])
-              hls=media[0].get('src',{}).get('hls','') if media else ''
-              return 'https:'+hls if hls.startswith('//') else hls
-          with ThreadPoolExecutor(max_workers=3) as pool: streams=list(pool.map(stream,items))
-          episodes=sorted(((item,url) for item,url in zip(items,streams) if url),key=lambda pair:pair[0].get('uploadDate',''),reverse=True)
-          lines=['<?xml version="1.0" encoding="UTF-8"?>','<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:podcast="https://podcastindex.org/namespace/1.0"><channel>','<title>Ajalootund R2-s</title>',f'<link>{SERIES}</link>','<description>ERRi arhiivis avaldatud Ajalootund R2-s saated. Helid voogedastatakse otse ERRi arhiivist.</description>','<language>et</language><itunes:author>ERR / Hillar Palamets</itunes:author><itunes:explicit>false</itunes:explicit>']
-          for item,url in episodes:
-              try: date=format_datetime(datetime.fromisoformat(item['uploadDate'].replace('Z','+00:00')).astimezone(timezone.utc))
-              except: date=''
-              lines.append(f'<item><title>{escape(item.get("heading",""))}</title><description>{escape(item.get("lead",""))}</description><guid isPermaLink="false">err-arhiiv-{item.get("fileId",item["url"])}</guid><link>https://arhiiv.err.ee/audio/vaata/{escape(item["url"])}</link><pubDate>{date}</pubDate><enclosure url="{escape(url)}" length="0" type="application/x-mpegURL"/><podcast:alternateEnclosure type="application/x-mpegURL"><podcast:source uri="{escape(url)}" type="application/x-mpegURL"/></podcast:alternateEnclosure></item>')
-          Path('ajalootund-r2-s.xml').write_text('\n'.join(lines+['</channel></rss>']),encoding='utf-8')
-          print('Episodes:',len(episodes))
+              detail = get_json(f"{API}/content/audio/{quote(item['url'], safe='')}")
+              hls = detail.get('media', {}).get('src', {}).get('hls', '')
+              return 'https:' + hls if hls.startswith('//') else hls
+
+          with ThreadPoolExecutor(max_workers=12) as pool:
+              streams=list(pool.map(stream,items))
+
+          entries=[]
+          for item, url in zip(items,streams):
+              if not url:
+                  continue
+              title=escape(item.get('heading') or item.get('title') or 'Ajalootund R2-s')
+              description=escape(item.get('lead') or item.get('description') or '')
+              link='https://arhiiv.err.ee/audio/'+item['url']
+              date=item.get('date') or item.get('created') or ''
+              try:
+                  pubdate=format_datetime(datetime.fromisoformat(date.replace('Z','+00:00')))
+              except Exception:
+                  pubdate=format_datetime(datetime.now(timezone.utc))
+              guid=escape(link)
+              source=escape(url, quote=True)
+              entries.append(f'''    <item>
+      <title>{title}</title>
+      <description>{description}</description>
+      <link>{escape(link, quote=True)}</link>
+      <guid isPermaLink="true">{guid}</guid>
+      <pubDate>{pubdate}</pubDate>
+      <enclosure url="{source}" length="0" type="application/x-mpegURL"/>
+      <podcast:alternateEnclosure type="application/x-mpegURL"><podcast:source uri="{source}" type="application/x-mpegURL"/></podcast:alternateEnclosure>
+    </item>''')
+
+          xml=f'''<?xml version="1.0" encoding="UTF-8"?>
+          <rss version="2.0" xmlns:podcast="https://podcastindex.org/namespace/1.0">
+            <channel>
+              <title>Ajalootund R2-s</title>
+              <link>{SERIES}</link>
+              <description>ERR Raadio 2 sarja Ajalootund R2-s arhiiv.</description>
+              <language>et</language>
+              <lastBuildDate>{format_datetime(datetime.now(timezone.utc))}</lastBuildDate>
+          {chr(10).join(entries)}
+            </channel>
+          </rss>
+          '''
+          Path('ajalootund-r2-s.xml').write_text(xml,encoding='utf-8')
+          print(f'Kirjutatud {len(entries)} saadet')
           PY
       - name: Salvesta RSS-fail
         run: |
-          git config user.name 'GitHub Actions'
+          git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add ajalootund-r2-s.xml
-          git diff --cached --quiet || (git commit -m 'Lisa Ajalootunni RSS' && git push)
+          git diff --cached --quiet || git commit -m 'Koosta Ajalootunni RSS'
+          git push
