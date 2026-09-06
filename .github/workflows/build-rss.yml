@@ -18,7 +18,7 @@ jobs:
           from urllib.request import Request, urlopen
           API='https://arhiiv.err.ee/api/v1'
           def read(url, method='GET'):
-              with urlopen(Request(url,method=method,headers={'Accept':'application/json'}),timeout=60) as r:
+              with urlopen(Request(url,method=method,headers={'Accept':'application/json','User-Agent':'Ajalootund RSS feed'}),timeout=60) as r:
                   return json.load(r)
           items={}
           for p in (1,2):
