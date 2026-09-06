@@ -40,9 +40,7 @@ jobs:
                       seen.add(item['url']); items.append(item)
 
           def stream(item):
-              detail = get_json(f"{API}/content/audio/{quote(item['url'], safe='')}")
-              hls = detail.get('media', {}).get('src', {}).get('hls', '')
-              return 'https:' + hls if hls.startswith('//') else hls
+              return f"{API}/audioDownload/{quote(item['url'], safe='')}"
 
           with ThreadPoolExecutor(max_workers=1) as pool:
               streams=list(pool.map(stream,items))
