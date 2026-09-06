@@ -61,15 +61,7 @@ jobs:
                   pubdate=format_datetime(datetime.now(timezone.utc))
               guid=escape(link)
               source=escape(url, quote=True)
-              entries.append(f'''    <item>
-      <title>{title}</title>
-      <description>{description}</description>
-      <link>{escape(link, quote=True)}</link>
-      <guid isPermaLink="true">{guid}</guid>
-      <pubDate>{pubdate}</pubDate>
-      <enclosure url="{source}" length="0" type="application/x-mpegURL"/>
-      <podcast:alternateEnclosure type="application/x-mpegURL"><podcast:source uri="{source}" type="application/x-mpegURL"/></podcast:alternateEnclosure>
-    </item>''')
+          entries.append(f'    <item>\n      <title>{title}</title>\n      <description>{description}</description>\n      <link>{escape(link, quote=True)}</link>\n      <guid isPermaLink="true">{guid}</guid>\n      <pubDate>{pubdate}</pubDate>\n      <enclosure url="{source}" length="0" type="application/x-mpegURL"/>\n      <podcast:alternateEnclosure type="application/x-mpegURL"><podcast:source uri="{source}" type="application/x-mpegURL"/></podcast:alternateEnclosure>\n    </item>')
 
           xml=f'''<?xml version="1.0" encoding="UTF-8"?>
           <rss version="2.0" xmlns:podcast="https://podcastindex.org/namespace/1.0">
