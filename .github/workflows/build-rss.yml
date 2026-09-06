@@ -1,85 +1,64 @@
 name: Koosta Ajalootunni RSS
-
 on:
   push:
     branches: [main]
+    paths: ['.github/workflows/build-rss.yml']
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
   build-feed:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Koosta RSS-fail
+      - name: Koosta ja kontrolli RSS
         run: |
           python3 - <<'PY'
-          from concurrent.futures import ThreadPoolExecutor
-          from datetime import datetime, timezone
-          from email.utils import format_datetime
-          from html import escape
-          import json
-          from pathlib import Path
-          from urllib.parse import quote
+          import json, datetime, email.utils, xml.etree.ElementTree as E
           from urllib.request import Request, urlopen
-
           API='https://arhiiv.err.ee/api/v1'
-          SERIES='https://arhiiv.err.ee/audio/seeria/ajalootund-r2-s?limit=500'
-
-          def get_json(url, method='GET'):
-              with urlopen(Request(url, method=method, headers={'Accept':'application/json','User-Agent':'Ajalootund RSS feed'}), timeout=60) as r:
+          def read(url, method='GET'):
+              with urlopen(Request(url,method=method,headers={'Accept':'application/json'}),timeout=60) as r:
                   return json.load(r)
-
-          pages=[get_json(f'{API}/series/audio/ajalootund-r2-s?limit=500&page={p}&all=false','POST') for p in (1,2)]
-          seen=set(); items=[]
-          for page in pages:
-              for item in page['activeList']['data']:
-                  if item.get('url') and item['url'] not in seen:
-                      seen.add(item['url']); items.append(item)
-
-          def stream(item):
-              return f"{API}/audioDownload/{quote(item['url'], safe='')}"
-
-          with ThreadPoolExecutor(max_workers=1) as pool:
-              streams=list(pool.map(stream,items))
-
-          entries=[]
-          for item, url in zip(items,streams):
-              if not url:
-                  continue
-              title=escape(item.get('heading') or item.get('title') or 'Ajalootund R2-s')
-              description=escape(item.get('lead') or item.get('description') or '')
-              link='https://arhiiv.err.ee/audio/'+item['url']
-              date=item.get('date') or item.get('created') or ''
+          items={}
+          for p in (1,2):
+              page=read(f'{API}/series/audio/ajalootund-r2-s?limit=500&page={p}&all=false','POST')
+              for i in page['activeList']['data']:
+                  items[i['url']]=i
+          assert len(items)==670, f'Expected 670 episodes, got {len(items)}'
+          root=E.Element('rss',version='2.0')
+          channel=E.SubElement(root,'channel')
+          def add(parent,key,value):
+              E.SubElement(parent,key).text=value
+          add(channel,'title','Ajalootund R2-s')
+          add(channel,'link','https://arhiiv.err.ee/audio/seeria/ajalootund-r2-s')
+          add(channel,'description','Hillar Palametsa Ajalootund R2-s. Helifailid ERR-i arhiivist.')
+          add(channel,'language','et')
+          for slug,i in items.items():
+              item=E.SubElement(channel,'item')
+              add(item,'title',i['heading'])
+              add(item,'description',i.get('lead',''))
+              add(item,'link','https://arhiiv.err.ee/audio/vaata/'+slug)
+              E.SubElement(item,'guid',isPermaLink='false').text='err-'+str(i['fileId'])
+              date=datetime.datetime.fromisoformat(i['uploadDate'].replace('Z','+00:00'))
+              add(item,'pubDate',email.utils.format_datetime(date))
+              E.SubElement(item,'enclosure',url=API+'/audioDownload/'+slug,length='0',type='audio/mpeg')
+          E.indent(root)
+          E.ElementTree(root).write('ajalootund-r2-s.xml',encoding='utf-8',xml_declaration=True)
+          assert len(E.parse('ajalootund-r2-s.xml').findall('./channel/item'))==670
+          print('VERIFIED: 670 unique episodes')
+          for slug in list(items)[::334]:
               try:
-                  pubdate=format_datetime(datetime.fromisoformat(date.replace('Z','+00:00')))
-              except Exception:
-                  pubdate=format_datetime(datetime.now(timezone.utc))
-              guid=escape(link)
-              source=escape(url, quote=True)
-          entries.append(f'    <item>\n      <title>{title}</title>\n      <description>{description}</description>\n      <link>{escape(link, quote=True)}</link>\n      <guid isPermaLink="true">{guid}</guid>\n      <pubDate>{pubdate}</pubDate>\n      <enclosure url="{source}" length="0" type="application/x-mpegURL"/>\n      <podcast:alternateEnclosure type="application/x-mpegURL"><podcast:source uri="{source}" type="application/x-mpegURL"/></podcast:alternateEnclosure>\n    </item>')
-
-          xml=f'''<?xml version="1.0" encoding="UTF-8"?>
-          <rss version="2.0" xmlns:podcast="https://podcastindex.org/namespace/1.0">
-            <channel>
-              <title>Ajalootund R2-s</title>
-              <link>{SERIES}</link>
-              <description>ERR Raadio 2 sarja Ajalootund R2-s arhiiv.</description>
-              <language>et</language>
-              <lastBuildDate>{format_datetime(datetime.now(timezone.utc))}</lastBuildDate>
-          {chr(10).join(entries)}
-            </channel>
-          </rss>
-          '''
-          Path('ajalootund-r2-s.xml').write_text(xml,encoding='utf-8')
-          print(f'Kirjutatud {len(entries)} saadet')
+                  with urlopen(Request(API+'/audioDownload/'+slug,headers={'Range':'bytes=0-1023'}),timeout=30) as r:
+                      data=r.read(1024)
+                      print('AUDIO CHECK',r.status,r.headers.get('Content-Type'),r.geturl(),len(data),data[:16].hex())
+              except Exception as ex:
+                  print('AUDIO CHECK FAILED',str(ex))
           PY
-      - name: Salvesta RSS-fail
+      - name: Salvesta RSS
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add ajalootund-r2-s.xml
-          git diff --cached --quiet || git commit -m 'Koosta Ajalootunni RSS'
+          git diff --cached --quiet || git commit -m 'Paranda RSS: kõik 670 saadet'
           git push
