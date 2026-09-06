@@ -16,9 +16,13 @@ jobs:
           python3 - <<'PY'
           import json, datetime, email.utils, xml.etree.ElementTree as E
           from urllib.request import Request, urlopen
+          from urllib.parse import urlsplit, urlencode
           API='https://arhiiv.err.ee/api/v1'
           def read(url, method='GET'):
-              with urlopen(Request(url,method=method,headers={'Accept':'application/json','User-Agent':'Ajalootund RSS feed'}),timeout=60) as r:
+              parts=urlsplit(url)
+              data=parts.query.encode() if method=='POST' else None
+              target=url.split('?')[0] if method=='POST' else url
+              with urlopen(Request(target,data=data,method=method,headers={'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded','User-Agent':'Ajalootund RSS feed'}),timeout=60) as r:
                   return json.load(r)
           items={}
           for p in (1,2):
